@@ -1,0 +1,37 @@
+{
+  "name": "koaHOUTAI-main",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@alicloud/sms-sdk": "^1.1.6",
+    "art-template": "^4.13.2",
+    "axios": "^0.23.0",
+    "ejs": "^3.1.5",
+    "http-errors": "^1.8.0",
+    "jsonwebtoken": "^8.5.1",
+    "koa": "^2.13.0",
+    "koa-art-template": "^1.1.1",
+    "koa-body": "^4.2.0",
+    "koa-bodyparser": "^4.3.0",
+    "koa-cors": "0.0.16",
+    "koa-multer": "^1.0.2",
+    "koa-router": "^9.4.0",
+    "koa-session": "^6.1.0",
+    "koa-static": "^5.0.0",
+    "koa-views": "^6.3.1",
+    "koa2-cors": "^2.0.6",
+    "moment": "^2.29.1",
+    "mongodb": "^3.6.2",
+    "node-uuid": "^1.4.8",
+    "node-xlsx": "^0.21.0",
+    "qr-image": "^3.2.0",
+    "silly-datetime": "^0.1.2"
+  }
+}
