@@ -7,8 +7,9 @@ app.use(bodyParser());
 // =====================================================
 
 // 查询昨天
-router.get("/cllNewretown", async (ctx) => {
-    const data = await DB.find('cllNewretown', {})
+router.post("/cllNewretown", async (ctx) => {
+    let sameTime = ctx.request.body.sameTime
+    const data = await DB.find('cllNewretown', {sameTime})
     const lastData = data[data.length - 1] || {}
     const dt = {
         static: 200,
