@@ -9,7 +9,8 @@ app.use(bodyParser());
 // 查询昨天
 router.post("/cllNewretown", async (ctx) => {
     let sameTime = ctx.request.body.sameTime
-    const data = await DB.find('cllNewretown', {sameTime})
+    let shipsId = ctx.request.body.shipsId
+    const data = await DB.find('cllNewretown', {sameTime, shipsId})
     const lastData = data[data.length - 1] || {}
     const dt = {
         static: 200,
@@ -21,6 +22,17 @@ router.post("/cllNewretown", async (ctx) => {
 router.get("/cllNewretown/yesterday", async (ctx) => {
     const data = await DB.find('cllNewretown', {})
     const lastData = data[data.length - 2] || {}
+    const dt = {
+        static: 200,
+        data: lastData
+    }
+    ctx.body = JSON.stringify(dt);
+})
+// 最后一次数据
+router.post("/cllNewretown/last", async (ctx) => {
+    let shipsId = ctx.request.body.shipsId
+    const data = await DB.find('cllNewretown', {shipsId})
+    const lastData = data[data.length - 1] || {}
     const dt = {
         static: 200,
         data: lastData
