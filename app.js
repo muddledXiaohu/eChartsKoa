@@ -40,7 +40,7 @@ app
 }))
 .use(koa_static(__dirname,"public"))  // 指定 public文件托管
 
-app.use(check)
+// app.use(check)
 app.use(users.routes())
 app.use(targetAim.routes())
 // 配置路由

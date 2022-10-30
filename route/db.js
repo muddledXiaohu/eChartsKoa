@@ -152,7 +152,7 @@ class Db {
     insertMany(collecionName, json) {
         return new Promise((res, req) => {
             this.connect().then((db) => {
-                db.collection(collecionName).insert(json, (err, result) => {
+                db.collection(collecionName).insertMany(json, (err, result) => {
                     if (err) {
                         return req(err)
                     }else{

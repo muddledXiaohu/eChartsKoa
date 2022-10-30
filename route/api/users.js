@@ -127,32 +127,48 @@ router.post('/user/login', async ctx => {
 })
 
 router.post('/analysisExcel', async ctx => {
-    const { file } = ctx.request.files;
-    const sheets = xlsx.parse(file.path);
+    const file = ctx.request.files;
+    const sheets = xlsx.parse(file.files.path);
     const sheetData = sheets[0].data;
     let result = [];
     const dataId = await DB.find('aim', {})
     const lastId = dataId.length != 0 ? dataId[dataId.length - 1].id + 1 : 1
     let ids = lastId
+    let KeyMp = {}
     // 字段过滤
-    sheetData.forEach((item, idx) => {
+    
+    let it = 0
+    for (const iterator of sheetData[0]) {
+        KeyMp[it] = iterator
+        it++
+    }
+    for (const idx in sheetData) {
         let arr = {}
-        let KeyMp = {
-            0: 'a',
-            1: 'b',
-            2: 'c',
-            3: 'd',
-        }
         if (idx != 0) {
-            item.forEach((items, index) => {
-                arr[KeyMp[index]] = items || 1
+            for (const key in sheetData[idx]) {
+                arr[KeyMp[key]] = sheetData[idx][key] || 1
+            }
+            const cx = {
+                Date_UTC: arr.Date_UTC,
+                Time_UTC: arr.Time_UTC
+            }
+            let ChangedData = {}
+            await DB.find('aim', cx).then((data) => {
+                ChangedData = data[0] || {}
             })
-            arr.id = ids++
-            result.push(arr)
+            if (ChangedData?.id) {
+                await DB.update('aim', cx, arr)
+            } else {
+                arr.id = ids++
+                result.push(arr)
+            }
         }
-    })
+    }
     // fs.unlinkSync(result);
-    const data = await DB.insertMany('aim', result)
+    let data = {}
+    if (result.length != 0) {
+        data = await DB.insertMany('aim', result)
+    }
     ctx.body = JSON.stringify(data);
 })
 module.exports = router
