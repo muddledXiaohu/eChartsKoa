@@ -4,6 +4,7 @@ const app = new koa()
 const router = require('koa-router')()
 const DB = require('../db')
 app.use(bodyParser());
+const dataModule = require('../data');
 // =====================================================
 
 // 查询昨天
@@ -138,18 +139,24 @@ router.post("/shipNo/create", async (ctx) => {
     let body = ctx.request.body
     const dataId = await DB.find('shipNo', {})
     const lastId = dataId.length != 0 ? dataId[dataId.length - 1].id + 1 : 1
+    const setPortLatitude = dataModule.coordinatesConvertDegreeMinuteSecond(body.setPort.latitude)
+    const setPortLongitude = dataModule.coordinatesConvertDegreeMinuteSecond(body.setPort.longitude)
+    const endPortLatitude = dataModule.coordinatesConvertDegreeMinuteSecond(body.endPort.latitude)
+    const endPortLongitude = dataModule.coordinatesConvertDegreeMinuteSecond(body.endPort.longitude)
     const params = {
-        shopName:body.shopName,
+        IMO:body.IMO,
         shopId:body.shopId,
-        imo:body.imo,
-        setPort:body.setPort,
-        endPort:body.endPort,
+        Voyage:body.Voyage,
+        setPort:body.setPort.value,
+        endPort:body.endPort.value,
+        setPortName:body.setPort.label,
+        endPortName:body.endPort.label,
         beginTime:body.beginTime,
-        endTime:body.endTime,
-        longitude:body.longitude,
-        latitude:body.latitude,
-        mileageTotal:body.mileageTotal,
-        mileageRemaining:body.mileageRemaining,
+        endTime: body.endTime,
+        setPortLatitude,
+        setPortLongitude,
+        endPortLatitude,
+        endPortLongitude,
         id:lastId
     }
     const data = await DB.insert('shipNo', params)
@@ -190,7 +197,8 @@ router.post("/shipping/create", async (ctx) => {
     const dataId = await DB.find('shipping', {})
     const lastId = dataId.length != 0 ? dataId[dataId.length - 1].id + 1 : 1
     const params = {
-        username:body.username,
+        IMO: body.IMO,
+        vModelData: body.vModelData,
         id:lastId
     }
     const data = await DB.insert('shipping', params)

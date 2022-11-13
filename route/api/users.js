@@ -127,8 +127,8 @@ router.post('/user/login', async ctx => {
 })
 
 router.post('/analysisExcel', async ctx => {
-    const file = ctx.request.files;
-    const sheets = xlsx.parse(file.files.path);
+    const {file} = ctx.request.files;
+    const sheets = xlsx.parse(file.path);
     const sheetData = sheets[0].data;
     let result = [];
     const dataId = await DB.find('aim', {})
@@ -170,5 +170,19 @@ router.post('/analysisExcel', async ctx => {
         data = await DB.insertMany('aim', result)
     }
     ctx.body = JSON.stringify(data);
+})
+// 查询分页
+router.post("/aim/paging", async (ctx) => {
+    //koa-bodyparser解析前端参数
+    let reqParam = ctx.request.body;
+    // let querys = String(reqParam.query);//检索内容
+    let page = Number(reqParam.pagenum);//当前第几页
+    let size = Number(reqParam.pagesize);//每页显示的记录条数
+    const everyOne =  await DB.find('aim', {})
+    await DB.count('aim', {}, size, (page - 1) * size).then((datas) => {
+        ctx.body = JSON.stringify({totalpage:everyOne.length, pagenum:page, pagesize:size, data: datas})
+    })
+    //是否还有更多
+    // let hasMore=totle-(page-1)*size>size?true:false;
 })
 module.exports = router
