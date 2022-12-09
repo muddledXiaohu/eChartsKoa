@@ -39,6 +39,15 @@ var qr = require('qr-image');
 const uuid = require('node-uuid')
 
 
+// params.M = params.tFC*3.114*1000*1000
+// params.W = params.odometer * 318689
+// params.attainedCII = params.M/params.W
+// params.refCII = 5247 * 318689 ^ (-0.61)
+// params.requiredCll = 0.99 * params.refCII
+// params.superiorBoundary = 0.82 * params.requiredCll
+// params.lowerBoundary = 0.93 * params.requiredCll
+// params.upperBoundary = 1.06 * params.requiredCll
+// params.inferiorBoundary = 1.28 * params.requiredCll
 // 查询全部考题信息
 router.get("/integKAOt", async (ctx) => {
     const data = await DB.find('subject', {})

@@ -8,10 +8,10 @@ const dataModule = require('../data');
 // =====================================================
 
 // 查询昨天
-router.post("/cllNewretown", async (ctx) => {
-    let sameTime = ctx.request.body.sameTime
-    let shipsId = ctx.request.body.shipsId
-    const data = await DB.find('cllNewretown', {sameTime, shipsId})
+router.post("/aimYester", async (ctx) => {
+    let Date_UTC = ctx.request.body.Date_UTC
+    let VoyageId = ctx.request.body.VoyageId
+    const data = await DB.find('aim', {Date_UTC, VoyageId})
     const lastData = data[data.length - 1] || {}
     const dt = {
         static: 200,
@@ -19,6 +19,28 @@ router.post("/cllNewretown", async (ctx) => {
     }
     ctx.body = JSON.stringify(dt);
 })
+// 查询昨天
+router.post("/cllYesterday", async (ctx) => {
+    let shipsId = ctx.request.body.shipsId
+    const data = await DB.find('cllNewretown', {shipsId})
+    const lastData = data[data.length - 1] || {}
+    const dt = {
+        static: 200,
+        data: lastData
+    }
+    ctx.body = JSON.stringify(dt);
+})
+
+router.post("/aimYesterday", async (ctx) => {
+    const data = await DB.find('aim', {})
+    const lastData = data[data.length - 1] || {}
+    const dt = {
+        static: 200,
+        data: lastData
+    }
+    ctx.body = JSON.stringify(dt);
+})
+
 // 查询前天
 router.get("/cllNewretown/yesterday", async (ctx) => {
     const data = await DB.find('cllNewretown', {})
@@ -42,32 +64,45 @@ router.post("/cllNewretown/last", async (ctx) => {
 })
 
 // 创建
-router.post("/cllNewretown/create", async (ctx) => {
+router.post("/aim/create", async (ctx) => {
     let body = ctx.request.body
-    const dataId = await DB.find('cllNewretown', {})
+    const dataId = await DB.find('aim', {})
     const lastId = dataId.length != 0 ? dataId[dataId.length - 1].id + 1 : 1
     const params = {
-        shipName:body.shipName,
-        mileageDay:body.mileageDay,
-        oilConsumption:body.oilConsumption,
-        sameTime:body.sameTime,
-        tFC:body.tFC,
-        odometer:body.odometer,
-        shipsId:body.shipsId,
+        IMO:body.IMO,
+        Date_UTC:body.Date_UTC,
+        Time_UTC:body.Time_UTC,
+        Voyage_From:body.Voyage_From,
+        Voyage_To:body.Voyage_To,
+        Latitude_Degree:body.Latitude_Degree,
+        Latitude_Minutes:body.Latitude_Minutes,
+        Latitude_North_South:body.Latitude_North_South,
+        Longitude_Degree:body.Longitude_Degree,
+        Longitude_Minutes:body.Longitude_Minutes,
+        Longitude_East_West:body.Longitude_East_West,
+        Event:body.Event,
+        Time_Since_Previous_Report:body.Time_Since_Previous_Report,
+        Time_Elapsed_Anchoring:body.Time_Elapsed_Anchoring,
+        Distance:body.Distance,
+        Cargo_Mt:body.Cargo_Mt,
+        ME_Consumption_HFO:body.ME_Consumption_HFO,
+        ME_Consumption_MGO:body.ME_Consumption_MGO,
+        HFO_ROB:body.HFO_ROB,
+        MGO_ROB:body.MGO_ROB,
+        shopId:body.shopId,
+        VoyageId:body.VoyageId,
         id:lastId
     }
-    params.M = params.tFC*3.114*1000*1000
-    params.W = params.odometer * 318689
-    params.attainedCII = params.M/params.W
-    params.refCII = 5247 * 318689 ^ (-0.61)
-    params.requiredCll = 0.99 * params.refCII
-    params.superiorBoundary = 0.82 * params.requiredCll
-    params.lowerBoundary = 0.93 * params.requiredCll
-    params.upperBoundary = 1.06 * params.requiredCll
-    params.inferiorBoundary = 1.28 * params.requiredCll
-    const data = await DB.insert('cllNewretown', params)
+    const calculationData = await calculationFnc(params, false)
+    const data = await DB.insert('aim', params)
     let dt = {}
-    if (data.result.ok === 1) {
+    if (data.result.ok === 1 &&calculationData.result.ok === 1) {
+        await DB.find('shipNo', {id: body.VoyageId}).then(async(data) => {
+            const datas = data[0] || {}
+            await DB.update('shipNo', datas, {
+                surplusvModelData:body.surplusvModelData
+            })
+        })
         dt = {
             start: 200,
             msg: '上传成功'
@@ -78,12 +113,56 @@ router.post("/cllNewretown/create", async (ctx) => {
     ctx.body = JSON.stringify(dt);
 })
 
+const calculationFnc = async(params, news) => {
+    const calculation = await DB.find('calculation', {shopId: params.shopId})
+    const calculationId = calculation.length != 0 ? calculation[calculation.length - 1].id + 1 : 1
+    let calculationArr = {
+        Date_UTC: params.Date_UTC,
+        Distance: params.Distance,
+        CumulativeDistance: params.Distance+(calculation[calculation.length - 1]?.CumulativeDistance||0),
+        ME_Consumption: params.ME_Consumption_HFO+params.ME_Consumption_MGO,
+        CumulativeME_Consumption: params.ME_Consumption_HFO+params.ME_Consumption_MGO+(calculation[calculation.length - 1]?.CumulativeME_Consumption||0),
+        id: calculationId,
+        IMO:params.IMO,
+        shopId: params.shopId,
+        Voyage_To: params.Voyage_To,
+        VoyageId:params.VoyageId,
+    }
+    calculationArr.M = (calculationArr.CumulativeME_Consumption || 0) * 3.114 * 1000 * 1000
+    calculationArr.W = 318689 * (calculationArr.CumulativeDistance || 0)
+    calculationArr.AttainedCII = calculationArr.M / calculationArr.W
+    calculationArr.cllref = 2.305988565
+    calculationArr.RequiredCII = 2.282928679
+    calculationArr.superiorBoundary = 1.872001517
+    calculationArr.lowerBoundary = 2.123123672
+    calculationArr.upperBoundary  = 2.4199044
+    calculationArr.inferiorBoundary = 2.92214871
+    if (!news) {
+        const calculationData = await DB.insert('calculation', calculationArr)
+        return calculationData
+    } else {
+        let ChangedArr = {}
+        await DB.find('calculation', {Date_UTC:params.Date_UTC}).then((data) => {
+            ChangedArr = data[0] || {}
+        })
+        let frontArr = {}
+        for (const key in ChangedArr) {
+            if (key != '_id') {
+                frontArr[key] = ChangedArr[key]
+            }
+        }
+        delete calculationArr.id
+        const calculationData = await DB.update('calculation', frontArr, calculationArr)
+        return calculationData
+    }
+}
+
 // 修改
-router.post("/cllNewretown/modify/:sameTime", async (ctx) => {
+router.post("/cllNewretown/modify", async (ctx) => {
     // 查询id
-    let sameTime = ctx.params.sameTime
+    let Date_UTC = ctx.request.body.Date_UTC
     let ChangedArr = {}
-    await DB.find('cllNewretown', {sameTime: sameTime}).then((data) => {
+    await DB.find('aim', {Date_UTC}).then((data) => {
         ChangedArr = data[0] || {}
     })
     let frontArr = {}
@@ -94,19 +173,38 @@ router.post("/cllNewretown/modify/:sameTime", async (ctx) => {
     }
     // 修改内容
     let body = ctx.request.body
-    body.M = body.tFC*3.114*1000*1000
-    body.W = body.odometer * 318689
-    body.attainedCII = body.M/body.W
-    body.refCII = 2.30598856512529
-    body.requiredCll = 0.99 * body.refCII
-    body.superiorBoundary = 0.82 * body.requiredCll
-    body.lowerBoundary = 0.93 * body.requiredCll
-    body.upperBoundary = 1.06 * body.requiredCll
-    body.inferiorBoundary = 1.28 * body.requiredCll
-    console.log(body);
-    const datas = await DB.update('cllNewretown', frontArr, body)
+    body.IMO=body.IMO
+    body.Date_UTC=body.Date_UTC
+    body.Time_UTC=body.Time_UTC
+    body.Voyage_From=body.Voyage_From
+    body.Voyage_To=body.Voyage_To
+    body.Latitude_Degree=body.Latitude_Degree
+    body.Latitude_Minutes=body.Latitude_Minutes
+    body.Latitude_North_South=body.Latitude_North_South
+    body.Longitude_Degree=body.Longitude_Degree
+    body.Longitude_Minutes=body.Longitude_Minutes
+    body.Longitude_East_West=body.Longitude_East_West
+    body.Event=body.Event
+    body.Time_Since_Previous_Report=body.Time_Since_Previous_Report
+    body.Time_Elapsed_Anchoring=body.Time_Elapsed_Anchoring
+    body.Distance=body.Distance
+    body.Cargo_Mt=body.Cargo_Mt
+    body.ME_Consumption_HFO=body.ME_Consumption_HFO
+    body.ME_Consumption_MGO=body.ME_Consumption_MGO
+    body.HFO_ROB=body.HFO_ROB
+    body.MGO_ROB=body.MGO_ROB
+    body.shopId=body.shopId
+    body.VoyageId = body.VoyageId
+    await calculationFnc(body, true)
+    const datas = await DB.update('aim', frontArr, body)
     let dt = {}
     if (datas.result.ok === 1) {
+        await DB.find('shipNo', {id: body.VoyageId}).then(async(data) => {
+            const shipNodatas = data[0] || {}
+            await DB.update('shipNo', shipNodatas, {
+                surplusvModelData:body.surplusvModelData
+            })
+        })
         dt = {
             start: 200,
             msg: '修改成功'
@@ -132,7 +230,91 @@ router.post("/cllNewretown/paging", async (ctx) => {
     // let hasMore=totle-(page-1)*size>size?true:false;
 })
 
+// 查询分页
+router.post("/calculation/paging", async (ctx) => {
+    //koa-bodyparser解析前端参数
+    let reqParam = ctx.request.body;
+    let IMO = reqParam.IMO;//检索内容
+    let page = Number(reqParam.pagenum);//当前第几页
+    let size = Number(reqParam.pagesize);//每页显示的记录条数
+    const everyOne = await DB.find('calculation', {})
 
+    let getData = {}
+    if (reqParam.IMO) {
+        getData.shopId = IMO
+    }
+    await DB.count('calculation', getData, size, (page - 1) * size).then((datas) => {
+        if (reqParam.displayMode != 0) {
+            if (reqParam.displayMode == 1) {
+                let itemDt = []
+                datas.forEach(item => {
+                    if (item.Date_UTC) {
+                        let date1 = getLastDay1();
+                        let date2 = getLastDay2();
+                        const Date_UTC = new Date(item.Date_UTC.replace(/-/g, "/"))
+                        if (new Date(date1.replace(/-/g, "/")) <Date_UTC&&Date_UTC< new Date(date2.replace(/-/g, "/"))) {
+                            itemDt.push(item)
+                        }
+                    }
+                })
+                ctx.body = JSON.stringify({totalpage:itemDt.length, pagenum:page, pagesize:size, data: itemDt})
+            }
+            if (reqParam.displayMode == 2) {
+                let date = new Date()
+                const startTime =new Date(new Date(date).getTime() - (3600 * 1000 * 24 * (new Date(date).getDay() == 0 ? 6 : new Date(date).getDay()-1)))
+                const endTime =new Date(new Date(date).getTime()+(3600*1000*24* (new Date(date).getDay()==0 ? 0:7- new Date(date).getDay(date))))
+                let itemDt = []
+                datas.forEach(item => {
+                    if (item.Date_UTC) {
+                        const Date_UTC = new Date(item.Date_UTC.replace(/-/g, "/"))
+                        if (startTime <Date_UTC&&Date_UTC< endTime) {
+                            itemDt.push(item)
+                        }
+                    }
+                })
+                ctx.body = JSON.stringify({totalpage:itemDt.length, pagenum:page, pagesize:size, data: itemDt})
+            }
+            if (reqParam.displayMode == 3) {
+                ctx.body = JSON.stringify({totalpage:everyOne.length, pagenum:page, pagesize:size, data: datas})
+            }
+        } else {
+            let itemDt = []
+            datas.forEach(item => {
+                if (item.VoyageId) {
+                    if (item.VoyageId==reqParam.VoyageId) {
+                        itemDt.push(item)
+                    }
+                }
+            })
+            ctx.body = JSON.stringify({totalpage:itemDt.length, pagenum:page, pagesize:size, data: itemDt})
+        }
+    })
+})
+
+function getLastDay1(){
+    let y = new Date().getFullYear(); //获取年份
+    let m = new Date().getMonth() + 1; //获取月份
+    let d = '01'
+    m = m < 10 ? '0' + m : m; //月份补 0
+    
+    return [y,m,d].join("-")
+}
+function getLastDay2(){
+    let y = new Date().getFullYear(); //获取年份
+    let m = new Date().getMonth() + 1; //获取月份
+    let d = new Date(y, m, 0).getDate(); //获取当月最后一日
+    m = m < 10 ? '0' + m : m; //月份补 0
+    d = d < 10 ? '0' + d : d; //日数补 0
+    return [y,m,d].join("-")
+}
+// id查询
+router.get("/calculationuserid/:id", async (ctx) => {
+    let ids = ctx.params
+    let id = parseInt(ids.id)
+    await DB.find('calculation', {shopId: id}).then((data) => {
+        ctx.body = JSON.stringify(data); // 响应请求，发送处理后的信息给客户端
+    })
+})
 
 // 创建船次号
 router.post("/shipNo/create", async (ctx) => {
@@ -153,6 +335,7 @@ router.post("/shipNo/create", async (ctx) => {
         endPortName:body.endPort.label,
         beginTime:body.beginTime,
         endTime: body.endTime,
+        surplusvModelData: body.surplusvModelData,
         setPortLatitude,
         setPortLongitude,
         endPortLatitude,
@@ -190,6 +373,16 @@ router.post("/shipNo/paging", async (ctx) => {
         ctx.body = JSON.stringify(data); // 响应请求，发送处理后的信息给客户端
     })
 })
+// 查询上次结束航次号
+router.get("/shipNoYesterday", async (ctx) => {
+    const data = await DB.find('shipNo', {})
+    const lastData = data[data.length - 2] || {}
+    const dt = {
+        static: 200,
+        data: lastData
+    }
+    ctx.body = JSON.stringify(dt);
+})
 
 // 创建船舶
 router.post("/shipping/create", async (ctx) => {
@@ -199,6 +392,7 @@ router.post("/shipping/create", async (ctx) => {
     const params = {
         IMO: body.IMO,
         vModelData: body.vModelData,
+        load: body.load,
         id:lastId
     }
     const data = await DB.insert('shipping', params)
@@ -217,18 +411,38 @@ router.post("/shipping/create", async (ctx) => {
     ctx.body = JSON.stringify(dt);
 })
 // 查询船舶
-router.post("/shipping/paging", async (ctx) => {
+router.post("/shipping/paging", async (ctx) => { 
     //koa-bodyparser解析前端参数
     let reqParam = ctx.request.body;
     let querys = String(reqParam.query);//检索内容
     let arr = {}
     if (querys) {
-        arr = {username: querys}
+        arr = {IMO: querys}
     }
     await DB.find('shipping', arr).then((data) => {
         ctx.body = JSON.stringify(data); // 响应请求，发送处理后的信息给客户端
     })
 })
+// 查询分页
+router.post("/shippingPage/paging", async (ctx) => {
+    //koa-bodyparser解析前端参数
+    let reqParam = ctx.request.body;
+    // let querys = String(reqParam.query);//检索内容
+    let page = Number(reqParam.pagenum);//当前第几页
+    let size = Number(reqParam.pagesize);//每页显示的记录条数
+    const everyOne =  await DB.find('shipping', {})
+    await DB.count('shipping', {}, size, (page - 1) * size).then((datas) => {
+        ctx.body = JSON.stringify({totalpage:everyOne.length, pagenum:page, pagesize:size, data: datas})
+    })
+    //是否还有更多
+    // let hasMore=totle-(page-1)*size>size?true:false;
+})
 
 
+router.delete("/knowleImguser", async (ctx) => {
+    let ids = ctx.params
+    let id = parseInt(ids.id)
+    const data = await DB.remove('shipping', {})
+    ctx.body = JSON.stringify(data); // 响应请求，发送处理后的信息给客户端
+})
 module.exports = router
