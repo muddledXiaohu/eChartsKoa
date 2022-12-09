@@ -137,6 +137,26 @@ const calculationFnc = async(params, news) => {
     calculationArr.lowerBoundary = 2.123123672
     calculationArr.upperBoundary  = 2.4199044
     calculationArr.inferiorBoundary = 2.92214871
+    if (calculationArr.AttainedCII<= calculationArr.superiorBoundary) {
+        calculationArr.boundary = 'A'
+    } else if (calculationArr.AttainedCII<= calculationArr.lowerBoundary) {
+        calculationArr.boundary = 'B'
+    } else if (calculationArr.AttainedCII<= calculationArr.upperBoundary) {
+        calculationArr.boundary = 'C'
+    } else if (calculationArr.AttainedCII<= calculationArr.inferiorBoundary) {
+        calculationArr.boundary = 'D'
+    } else {
+        calculationArr.boundary = 'E'
+    }
+    if (calculation.length != 0 && calculation[calculation.length - 2]) {
+        if (calculation[calculation.length - 2].AttainedCII<calculationArr.AttainedCII) {
+            calculationArr.performance = '下'
+        } else {
+            calculationArr.performance = '上'
+        }
+    } else {
+        calculationArr.performance = '上'
+    }
     if (!news) {
         const calculationData = await DB.insert('calculation', calculationArr)
         return calculationData
