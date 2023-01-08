@@ -4,6 +4,7 @@ const bodyParser= require('koa-bodyparser')
 const fs= require('fs')
 const path = require('path')
 const xlsx = require("node-xlsx");
+const dataModule = require('../data');
 
 // 实例化
 const app = new koa()
@@ -127,7 +128,8 @@ router.post('/user/login', async ctx => {
 })
 
 router.post('/analysisExcel', async ctx => {
-    const {file} = ctx.request.files;
+    const { file } = ctx.request.files;
+    const {type} = ctx.request.body
     const sheets = xlsx.parse(file.path);
     const sheetData = sheets[0].data;
     let result = [];
@@ -150,47 +152,9 @@ router.post('/analysisExcel', async ctx => {
             }
             const cx = {
                 Date_UTC: arr.Date_UTC,
-                Time_UTC: arr.Time_UTC
+                shippingId:Number(type)
             }
-            await DB.find('shipping', {IMO:arr.IMO}).then(async(data) => {
-                if (data[0]?.id) {
-                    arr.shopId = data[0].id
-                } else {
-                    const dataId = await DB.find('shipping', {})
-                    const lastId = dataId.length != 0 ? dataId[dataId.length - 1].id + 1 : 1
-                    const params = {
-                        IMO: arr.IMO,
-                        vModelData: {},
-                        load: null,
-                        id:lastId
-                    }
-                    await DB.insert('shipping', params)
-                    arr.shopId = lastId
-                }
-            })
-            await DB.find('shipNo', {Voyage:arr.Voyage_To}).then(async(data) => {
-                if (data[0]?.id) {
-                    arr.VoyageId = data[0].id
-                } else {
-                    const dataId = await DB.find('shipNo', {})
-                    const lastId = dataId.length != 0 ? dataId[dataId.length - 1].id + 1 : 1
-                    const params = {
-                        IMO:arr.IMO,
-                        shopId:arr.shopId,
-                        Voyage:arr.Voyage_To,
-                        setPort:'',
-                        endPort:'',
-                        setPortName:'',
-                        endPortName:'',
-                        beginTime:'',
-                        endTime: '',
-                        surplusvModelData: '',
-                        id:lastId
-                    }
-                    await DB.insert('shipNo', params)
-                    arr.VoyageId = lastId
-                }
-            })
+            arr.shippingId = Number(type)
             // const calculationData = await calculationFnc(arr, false)
             let ChangedData = {}
             await DB.find('aim', cx).then((data) => {
@@ -201,7 +165,7 @@ router.post('/analysisExcel', async ctx => {
                 // await calculationFnc(arr, true)
             } else {
                 arr.id = ids++
-                // await calculationFnc(arr, false)
+                await calculationFnc(arr, false)
                 result.push(arr)
             }
         }
@@ -213,28 +177,93 @@ router.post('/analysisExcel', async ctx => {
     }
     ctx.body = JSON.stringify(data);
 })
+
+
 const calculationFnc = async(params, news) => {
-    const calculation = await DB.find('calculation', {shopId: params.shopId})
+    const calculation = await DB.find('calculation', {shippingId: params.shippingId})
+    const shippingDt = await DB.find('shipping', {id: params.shippingId})
     const calculationId = calculation.length != 0 ? calculation[calculation.length - 1].id + 1 : 1
+    let CumulativeDistance = 0
+    let CumulativeME_Consumption = 0
+    if (calculation.length==0 || params.Voyage_From == calculation[calculation.length - 1]?.Voyage_To) {
+        CumulativeDistance =Number(params.Distance)
+        CumulativeME_Consumption =Number(Number(params.ME_Consumption_HFO)+Number(params.ME_Consumption_MGO))
+    } else {
+        CumulativeDistance =Number(params.Distance)+Number(calculation[calculation.length - 1]?.CumulativeDistance||0)
+        CumulativeME_Consumption =Number(Number(params.ME_Consumption_HFO)+Number(params.ME_Consumption_MGO)+Number(calculation[calculation.length - 1]?.CumulativeME_Consumption||0))
+    }
     let calculationArr = {
         Date_UTC: params.Date_UTC,
-        Distance: params.Distance,
-        CumulativeDistance: params.Distance+(calculation[calculation.length - 1]?.CumulativeDistance||0),
-        ME_Consumption: params.ME_Consumption_HFO+params.ME_Consumption_MGO,
-        CumulativeME_Consumption: params.ME_Consumption_HFO+params.ME_Consumption_MGO+(calculation[calculation.length - 1]?.CumulativeME_Consumption||0),
+        Voyage_From: params.Voyage_From,
+        Voyage_To: params.Voyage_To,
+        Distance: Number(params.Distance),
+        CumulativeDistance,
+        ME_Consumption: Number(Number(params.ME_Consumption_HFO)+Number(params.ME_Consumption_MGO)),
+        CumulativeME_Consumption,
         id: calculationId,
-        shopId:params.shopId,
-        VoyageId:params.VoyageId,
+        IMO:params.IMO,
+        shippingId: params.shippingId,
     }
-    calculationArr.M = (calculationArr.CumulativeME_Consumption || 0) * 3.114 * 1000 * 1000
-    calculationArr.W = 318689 * (calculationArr.CumulativeDistance || 0)
+    calculationArr.CumulativeME_Consumption=calculationArr.CumulativeME_Consumption.toFixed(2)
+    calculationArr.CumulativeDistance=calculationArr.CumulativeDistance.toFixed(2)
+    const shippingItem = shippingDt[0] || {}
+    const calculationitem = calculation[0]||{}
+    const fuelTypes = params.ME_Consumption_HFO != 0 ? 'HFO':'LFO';
+    // for (const iterator of shippingItem.vModelData) {
+        
+    // }
+    const Capacitys =dataModule.Capacity(
+        shippingItem.models,
+        shippingItem.summerDeadWeight,
+        shippingItem.gt
+    )
+    calculationArr.W = Capacitys * shippingItem.summerDeadWeight*calculationArr.CumulativeDistance
+    calculationArr.M = dataModule.fc(
+        shippingItem.models,
+        shippingItem.summerDeadWeight,
+        1,
+        shippingItem.summerDeadWeight,
+    )*1000000*dataModule.CF(fuelTypes)*calculationArr.CumulativeME_Consumption
     calculationArr.AttainedCII = calculationArr.M / calculationArr.W
-    calculationArr.cllref = 2.305988565
-    calculationArr.RequiredCII = 2.282928679
-    calculationArr.superiorBoundary = 1.872001517
-    calculationArr.lowerBoundary = 2.123123672
-    calculationArr.upperBoundary  = 2.4199044
-    calculationArr.inferiorBoundary = 2.92214871
+    calculationArr.performance = params.AttainedCII <= calculationitem?.AttainedCII ? '上' : '下';
+    let Year_Reduction = {'2019':0, '2020':1, '2021':2, '2022':3, '2023':5, '2024':7, '2025':9, '2026':11}
+    const z = Year_Reduction[params.Date_UTC.slice(0,4)];
+    calculationArr.CllRef = dataModule.REQCII(
+        shippingItem.models,
+        shippingItem.summerDeadWeight,
+        shippingItem.gt
+    )
+    calculationArr.RequiredCII = (1 - z / 100) * calculationArr.CllRef
+    calculationArr.boundary = dataModule.Rating_Director(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        calculationArr.AttainedCII,
+    )
+    calculationArr.superiorBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        0
+    )
+    calculationArr.lowerBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        1
+    )
+    calculationArr.upperBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        2
+    )
+    calculationArr.inferiorBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        3
+    )
     if (!news) {
         const calculationData = await DB.insert('calculation', calculationArr)
         return calculationData
@@ -254,6 +283,7 @@ const calculationFnc = async(params, news) => {
         return calculationData
     }
 }
+
 // 查询分页
 router.post("/aim/paging", async (ctx) => {
     //koa-bodyparser解析前端参数

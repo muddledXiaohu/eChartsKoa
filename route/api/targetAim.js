@@ -7,11 +7,34 @@ app.use(bodyParser());
 const dataModule = require('../data');
 // =====================================================
 
+// aim查询
+router.post("/aimQuery", async (ctx) => {
+    let shippingId = ctx.request.body.shippingId
+    const data = await DB.find('aim', {shippingId})
+    const lastData = data.length!=0 ? data:[]
+    const dt = {
+        static: 200,
+        data: lastData
+    }
+    ctx.body = JSON.stringify(dt);
+})
+router.post("/aimQuery/paging", async (ctx) => {
+    //koa-bodyparser解析前端参数
+    let reqParam = ctx.request.body;
+    let shippingId = Number(reqParam.shippingId);
+    let page = Number(reqParam.pagenum);//当前第几页
+    let size = Number(reqParam.pagesize);//每页显示的记录条数
+    const everyOne =  await DB.find('aim', {})
+    await DB.count('aim', {shippingId}, size, (page - 1) * size).then((datas) => {
+        ctx.body = JSON.stringify({totalpage:everyOne.length, pagenum:page, pagesize:size, data: datas})
+    })
+    //是否还有更多
+    // let hasMore=totle-(page-1)*size>size?true:false;
+})
 // 查询昨天
 router.post("/aimYester", async (ctx) => {
-    let Date_UTC = ctx.request.body.Date_UTC
-    let VoyageId = ctx.request.body.VoyageId
-    const data = await DB.find('aim', {Date_UTC, VoyageId})
+    let shippingId = ctx.request.body.shippingId
+    const data = await DB.find('aim', {shippingId})
     const lastData = data[data.length - 1] || {}
     const dt = {
         static: 200,
@@ -85,78 +108,116 @@ router.post("/aim/create", async (ctx) => {
         Time_Elapsed_Anchoring:body.Time_Elapsed_Anchoring,
         Distance:body.Distance,
         Cargo_Mt:body.Cargo_Mt,
-        ME_Consumption_HFO:body.ME_Consumption_HFO,
-        ME_Consumption_MGO:body.ME_Consumption_MGO,
-        HFO_ROB:body.HFO_ROB,
-        MGO_ROB:body.MGO_ROB,
-        shopId:body.shopId,
-        VoyageId:body.VoyageId,
+        ME_Consumption_HFO:body.ME_Consumption_HFO||0,
+        ME_Consumption_MGO:body.ME_Consumption_MGO||0,
+        HFO_ROB:body.HFO_ROB||0,
+        MGO_ROB:body.MGO_ROB||0,
+        shippingId:body.shippingId,
         id:lastId
     }
-    const calculationData = await calculationFnc(params, false)
+    await calculationFnc(params, false)
     const data = await DB.insert('aim', params)
     let dt = {}
-    if (data.result.ok === 1 &&calculationData.result.ok === 1) {
-        await DB.find('shipNo', {id: body.VoyageId}).then(async(data) => {
-            const datas = data[0] || {}
-            await DB.update('shipNo', datas, {
-                surplusvModelData:body.surplusvModelData
-            })
-        })
+    if (data.result.ok === 1) {
         dt = {
             start: 200,
             msg: '上传成功'
         }
     } else {
-        console.log(data);
+        dt = {
+            start: 500,
+            msg: '上传失败'
+        }
     }
     ctx.body = JSON.stringify(dt);
 })
 
+
 const calculationFnc = async(params, news) => {
-    const calculation = await DB.find('calculation', {shopId: params.shopId})
+    const calculation = await DB.find('calculation', {shippingId: params.shippingId})
+    const shippingDt = await DB.find('shipping', {id: params.shippingId})
     const calculationId = calculation.length != 0 ? calculation[calculation.length - 1].id + 1 : 1
+    let CumulativeDistance = 0
+    let CumulativeME_Consumption = 0
+    if (calculation.length==0 || params.Voyage_From == calculation[calculation.length - 1]?.Voyage_To) {
+        CumulativeDistance =Number(params.Distance)
+        CumulativeME_Consumption =Number(Number(params.ME_Consumption_HFO)+Number(params.ME_Consumption_MGO))
+    } else {
+        CumulativeDistance =Number(params.Distance)+Number(calculation[calculation.length - 1]?.CumulativeDistance||0)
+        CumulativeME_Consumption =Number(Number(params.ME_Consumption_HFO)+Number(params.ME_Consumption_MGO)+Number(calculation[calculation.length - 1]?.CumulativeME_Consumption||0))
+    }
     let calculationArr = {
         Date_UTC: params.Date_UTC,
-        Distance: params.Distance,
-        CumulativeDistance: params.Distance+(calculation[calculation.length - 1]?.CumulativeDistance||0),
-        ME_Consumption: params.ME_Consumption_HFO+params.ME_Consumption_MGO,
-        CumulativeME_Consumption: params.ME_Consumption_HFO+params.ME_Consumption_MGO+(calculation[calculation.length - 1]?.CumulativeME_Consumption||0),
+        Voyage_From: params.Voyage_From,
+        Voyage_To: params.Voyage_To,
+        Distance: Number(params.Distance),
+        CumulativeDistance,
+        ME_Consumption: Number(Number(params.ME_Consumption_HFO)+Number(params.ME_Consumption_MGO)),
+        CumulativeME_Consumption,
         id: calculationId,
         IMO:params.IMO,
-        shopId: params.shopId,
-        Voyage_To: params.Voyage_To,
-        VoyageId:params.VoyageId,
+        shippingId: params.shippingId,
     }
-    calculationArr.M = (calculationArr.CumulativeME_Consumption || 0) * 3.114 * 1000 * 1000
-    calculationArr.W = 318689 * (calculationArr.CumulativeDistance || 0)
+    calculationArr.CumulativeME_Consumption=calculationArr.CumulativeME_Consumption.toFixed(2)
+    calculationArr.CumulativeDistance=calculationArr.CumulativeDistance.toFixed(2)
+    const shippingItem = shippingDt[0] || {}
+    const calculationitem = calculation[0]||{}
+    const fuelTypes = params.ME_Consumption_HFO != 0 ? 'HFO':'LFO';
+    // for (const iterator of shippingItem.vModelData) {
+        
+    // }
+    const Capacitys =dataModule.Capacity(
+        shippingItem.models,
+        shippingItem.summerDeadWeight,
+        shippingItem.gt
+    )
+    calculationArr.W = Capacitys * shippingItem.summerDeadWeight*calculationArr.CumulativeDistance
+    calculationArr.M = dataModule.fc(
+        shippingItem.models,
+        shippingItem.summerDeadWeight,
+        1,
+        shippingItem.summerDeadWeight,
+    )*1000000*dataModule.CF(fuelTypes)*calculationArr.CumulativeME_Consumption
     calculationArr.AttainedCII = calculationArr.M / calculationArr.W
-    calculationArr.cllref = 2.305988565
-    calculationArr.RequiredCII = 2.282928679
-    calculationArr.superiorBoundary = 1.872001517
-    calculationArr.lowerBoundary = 2.123123672
-    calculationArr.upperBoundary  = 2.4199044
-    calculationArr.inferiorBoundary = 2.92214871
-    if (calculationArr.AttainedCII<= calculationArr.superiorBoundary) {
-        calculationArr.boundary = 'A'
-    } else if (calculationArr.AttainedCII<= calculationArr.lowerBoundary) {
-        calculationArr.boundary = 'B'
-    } else if (calculationArr.AttainedCII<= calculationArr.upperBoundary) {
-        calculationArr.boundary = 'C'
-    } else if (calculationArr.AttainedCII<= calculationArr.inferiorBoundary) {
-        calculationArr.boundary = 'D'
-    } else {
-        calculationArr.boundary = 'E'
-    }
-    if (calculation.length != 0 && calculation[calculation.length - 2]) {
-        if (calculation[calculation.length - 2].AttainedCII<calculationArr.AttainedCII) {
-            calculationArr.performance = '下'
-        } else {
-            calculationArr.performance = '上'
-        }
-    } else {
-        calculationArr.performance = '上'
-    }
+    calculationArr.performance = params.AttainedCII <= calculationitem?.AttainedCII ? '上' : '下';
+    let Year_Reduction = {'2019':0, '2020':1, '2021':2, '2022':3, '2023':5, '2024':7, '2025':9, '2026':11}
+    const z = Year_Reduction[params.Date_UTC.slice(0,4)];
+    calculationArr.CllRef = dataModule.REQCII(
+        shippingItem.models,
+        shippingItem.summerDeadWeight,
+        shippingItem.gt
+    )
+    calculationArr.RequiredCII = (1 - z / 100) * calculationArr.CllRef
+    calculationArr.boundary = dataModule.Rating_Director(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        calculationArr.AttainedCII,
+    )
+    calculationArr.superiorBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        0
+    )
+    calculationArr.lowerBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        1
+    )
+    calculationArr.upperBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        2
+    )
+    calculationArr.inferiorBoundary =dataModule.boundary(
+        shippingItem.models,
+        Capacitys,
+        calculationArr.RequiredCII,
+        3
+    )
     if (!news) {
         const calculationData = await DB.insert('calculation', calculationArr)
         return calculationData
@@ -193,44 +254,42 @@ router.post("/cllNewretown/modify", async (ctx) => {
     }
     // 修改内容
     let body = ctx.request.body
-    body.IMO=body.IMO
-    body.Date_UTC=body.Date_UTC
-    body.Time_UTC=body.Time_UTC
-    body.Voyage_From=body.Voyage_From
-    body.Voyage_To=body.Voyage_To
-    body.Latitude_Degree=body.Latitude_Degree
-    body.Latitude_Minutes=body.Latitude_Minutes
-    body.Latitude_North_South=body.Latitude_North_South
-    body.Longitude_Degree=body.Longitude_Degree
-    body.Longitude_Minutes=body.Longitude_Minutes
-    body.Longitude_East_West=body.Longitude_East_West
-    body.Event=body.Event
-    body.Time_Since_Previous_Report=body.Time_Since_Previous_Report
-    body.Time_Elapsed_Anchoring=body.Time_Elapsed_Anchoring
-    body.Distance=body.Distance
-    body.Cargo_Mt=body.Cargo_Mt
-    body.ME_Consumption_HFO=body.ME_Consumption_HFO
-    body.ME_Consumption_MGO=body.ME_Consumption_MGO
-    body.HFO_ROB=body.HFO_ROB
-    body.MGO_ROB=body.MGO_ROB
-    body.shopId=body.shopId
-    body.VoyageId = body.VoyageId
-    await calculationFnc(body, true)
-    const datas = await DB.update('aim', frontArr, body)
+    const params = {
+        IMO:body.IMO,
+        Date_UTC:body.Date_UTC,
+        Time_UTC:body.Time_UTC,
+        Voyage_From:body.Voyage_From,
+        Voyage_To:body.Voyage_To,
+        Latitude_Degree:body.Latitude_Degree,
+        Latitude_Minutes:body.Latitude_Minutes,
+        Latitude_North_South:body.Latitude_North_South,
+        Longitude_Degree:body.Longitude_Degree,
+        Longitude_Minutes:body.Longitude_Minutes,
+        Longitude_East_West:body.Longitude_East_West,
+        Event:body.Event,
+        Time_Since_Previous_Report:body.Time_Since_Previous_Report,
+        Time_Elapsed_Anchoring:body.Time_Elapsed_Anchoring,
+        Distance:body.Distance,
+        Cargo_Mt:body.Cargo_Mt,
+        ME_Consumption_HFO:body.ME_Consumption_HFO||0,
+        ME_Consumption_MGO:body.ME_Consumption_MGO||0,
+        HFO_ROB:body.HFO_ROB||0,
+        MGO_ROB:body.MGO_ROB||0,
+        shippingId:body.shippingId,
+    }
+    // await calculationFnc(body, true)
+    const datas = await DB.update('aim', frontArr, params)
     let dt = {}
     if (datas.result.ok === 1) {
-        await DB.find('shipNo', {id: body.VoyageId}).then(async(data) => {
-            const shipNodatas = data[0] || {}
-            await DB.update('shipNo', shipNodatas, {
-                surplusvModelData:body.surplusvModelData
-            })
-        })
         dt = {
             start: 200,
             msg: '修改成功'
         }
     } else {
-        console.log(123);
+        dt = {
+            start: 500,
+            msg: '修改失败'
+        }
     }
     ctx.body = JSON.stringify(dt);
 
@@ -249,7 +308,20 @@ router.post("/cllNewretown/paging", async (ctx) => {
     //是否还有更多
     // let hasMore=totle-(page-1)*size>size?true:false;
 })
-
+// 查询分页
+router.post("/CIICalculation/paging", async (ctx) => {
+    //koa-bodyparser解析前端参数
+    let reqParam = ctx.request.body;
+    let querys = String(reqParam.query);//检索内容
+    let page = Number(reqParam.pagenum);//当前第几页
+    let size = Number(reqParam.pagesize);//每页显示的记录条数
+    const everyOne =  await DB.find('calculation', {})
+    await DB.count('calculation', { shippingId: Number(querys) }, size, (page - 1) * size).then((datas) => {
+        ctx.body = JSON.stringify({totalpage:everyOne.length, pagenum:page, pagesize:size, data: datas})
+    })
+    //是否还有更多
+    // let hasMore=totle-(page-1)*size>size?true:false;
+})
 // 查询分页
 router.post("/calculation/paging", async (ctx) => {
     //koa-bodyparser解析前端参数
@@ -261,9 +333,9 @@ router.post("/calculation/paging", async (ctx) => {
 
     let getData = {}
     if (reqParam.IMO) {
-        getData.shopId = IMO
+        getData.shippingId = IMO
     }
-    await DB.count('calculation', getData, size, (page - 1) * size).then((datas) => {
+    await DB.find('calculation', getData).then((datas) => {
         if (reqParam.displayMode != 0) {
             if (reqParam.displayMode == 1) {
                 let itemDt = []
@@ -277,7 +349,7 @@ router.post("/calculation/paging", async (ctx) => {
                         }
                     }
                 })
-                ctx.body = JSON.stringify({totalpage:itemDt.length, pagenum:page, pagesize:size, data: itemDt})
+                ctx.body = JSON.stringify({totalpage:datas.length, pagenum:page, pagesize:size, data: itemDt.splice(page==1?0:page*size-size+1,size)})
             }
             if (reqParam.displayMode == 2) {
                 let date = new Date()
@@ -292,21 +364,21 @@ router.post("/calculation/paging", async (ctx) => {
                         }
                     }
                 })
-                ctx.body = JSON.stringify({totalpage:itemDt.length, pagenum:page, pagesize:size, data: itemDt})
+                ctx.body = JSON.stringify({totalpage:datas.length, pagenum:page, pagesize:size, data: itemDt.splice(page==1?0:page*size-size+1,size)})
             }
             if (reqParam.displayMode == 3) {
-                ctx.body = JSON.stringify({totalpage:everyOne.length, pagenum:page, pagesize:size, data: datas})
+                ctx.body = JSON.stringify({totalpage:everyOne.length, pagenum:page, pagesize:size, data: datas.splice(page==1?0:page*size-size+1,size)})
             }
         } else {
             let itemDt = []
             datas.forEach(item => {
-                if (item.VoyageId) {
-                    if (item.VoyageId==reqParam.VoyageId) {
+                if (item.shippingId) {
+                    if (item.shippingId==reqParam.IMO) {
                         itemDt.push(item)
                     }
                 }
             })
-            ctx.body = JSON.stringify({totalpage:itemDt.length, pagenum:page, pagesize:size, data: itemDt})
+            ctx.body = JSON.stringify({totalpage:datas.length, pagenum:page, pagesize:size, data: itemDt.splice(page==1?0:page*size-size+1,size)})
         }
     })
 })
@@ -411,9 +483,41 @@ router.post("/shipping/create", async (ctx) => {
     const lastId = dataId.length != 0 ? dataId[dataId.length - 1].id + 1 : 1
     const params = {
         IMO: body.IMO,
-        vModelData: body.vModelData,
+        aeFuelType: body.aeFuelType,
+        aeNumber: body.aeNumber,
+        aeSMCR: body.aeSMCR,
+        aeType: body.aeType,
+        aeVmodelData: body.aeVmodelData,
+        ballastDraughtTop: body.ballastDraughtTop,
+        ballastDraughtTail: body.ballastDraughtTail,
+        betwLength: body.betwLength,
+        classCcs: body.classCcs,
+        designDraught: body.designDraught,
+        fuelType: body.fuelType,
+        gt: body.gt,
+        lengthOverAll: body.lengthOverAll,
+        limitEEXI: body.limitEEXI,
+        limitEEXIRpm: body.limitEEXIRpm,
         load: body.load,
-        id:lastId
+        meCSR: body.meCSR,
+        meCsrRpm: body.meCsrRpm,
+        meNumber: body.meNumber,
+        meSMCR: body.meSMCR,
+        meSmcrRpm: body.meSmcrRpm,
+        meType: body.meType,
+        models: body.models,
+        name: body.name,
+        numberNo: body.numberNo,
+        remarks: body.remarks,
+        scantlingDraught: body.scantlingDraught,
+        shipBreadth: body.shipBreadth,
+        shipDesigner: body.shipDesigner,
+        shipbuilding: body.shipbuilding,
+        shipowner: body.shipowner,
+        summerDeadWeight: body.summerDeadWeight,
+        vModelData: body.vModelData,
+        id: lastId,
+        indexId:lastId
     }
     const data = await DB.insert('shipping', params)
     let dt = {}
@@ -430,17 +534,117 @@ router.post("/shipping/create", async (ctx) => {
     }
     ctx.body = JSON.stringify(dt);
 })
+// 修改
+router.post("/shipping/modify", async (ctx) => {
+    // 查询id
+    let id = ctx.request.body.id
+    let ChangedArr = {}
+    await DB.find('shipping', {id}).then((data) => {
+        ChangedArr = data[0] || {}
+    })
+    let frontArr = {}
+    for (const key in ChangedArr) {
+        if (key != '_id') {
+            frontArr[key] = ChangedArr[key]
+        }
+    }
+    // 修改内容
+    let body = ctx.request.body
+    const params = {
+        IMO: body.IMO,
+        aeFuelType: body.aeFuelType,
+        aeNumber: body.aeNumber,
+        aeSMCR: body.aeSMCR,
+        aeType: body.aeType,
+        aeVmodelData: body.aeVmodelData,
+        ballastDraughtTop: body.ballastDraughtTop,
+        ballastDraughtTail: body.ballastDraughtTail,
+        
+        betwLength: body.betwLength,
+        classCcs: body.classCcs,
+        designDraught: body.designDraught,
+        fuelType: body.fuelType,
+        gt: body.gt,
+        lengthOverAll: body.lengthOverAll,
+        limitEEXI: body.limitEEXI,
+        limitEEXIRpm: body.limitEEXIRpm,
+        
+        load: body.load,
+        meCSR: body.meCSR,
+        meCsrRpm: body.meCsrRpm,
+        meNumber: body.meNumber,
+        meSMCR: body.meSMCR,
+        meSmcrRpm: body.meSmcrRpm,
+        meType: body.meType,
+        models: body.models,
+        name: body.name,
+        numberNo: body.numberNo,
+        remarks: body.remarks,
+        scantlingDraught: body.scantlingDraught,
+        shipBreadth: body.shipBreadth,
+        shipDesigner: body.shipDesigner,
+        shipbuilding: body.shipbuilding,
+        shipowner: body.shipowner,
+        summerDeadWeight: body.summerDeadWeight,
+        vModelData: body.vModelData,
+    }
+    // await calculationFnc(body, true)
+    const datas = await DB.update('shipping', frontArr, params)
+    let dt = {}
+    if (datas.result.ok === 1) {
+        dt = {
+            start: 200,
+            msg: '修改成功'
+        }
+    } else {
+        dt = {
+            start: 500,
+            msg: '修改失败'
+        }
+    }
+    ctx.body = JSON.stringify(dt);
+
+})
+router.post("/shipping/forModify", async (ctx) => {
+    let arrs = ctx.request.body.arrs
+    let ok = true
+    for (const iterator of arrs) {
+        delete iterator._id
+        const datas = await DB.update('shipping', { id: iterator.id }, iterator)
+        if (datas.result.ok!=1) {
+            ok=false
+        }
+    }
+    // await calculationFnc(body, true)
+    let dt = {}
+    if (ok) {
+        dt = {
+            start: 200,
+            msg: '修改成功'
+        }
+    } else {
+        dt = {
+            start: 500,
+            msg: '修改失败'
+        }
+    }
+    ctx.body = JSON.stringify(dt);
+
+})
 // 查询船舶
 router.post("/shipping/paging", async (ctx) => { 
     //koa-bodyparser解析前端参数
     let reqParam = ctx.request.body;
-    let querys = String(reqParam.query);//检索内容
+    let querys = Number(reqParam.query);//检索内容
     let arr = {}
     if (querys) {
-        arr = {IMO: querys}
+        arr = {id: querys}
     }
     await DB.find('shipping', arr).then((data) => {
-        ctx.body = JSON.stringify(data); // 响应请求，发送处理后的信息给客户端
+        data.sort((a,b) =>{
+            return a.indexId - b.indexId
+        })
+        ctx.body = JSON.stringify(data||[]); // 响应请求，发送处理后的信息给客户端
     })
 })
 // 查询分页
